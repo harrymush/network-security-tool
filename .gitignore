@@ -23,11 +23,15 @@ wheels/
 # PyInstaller
 build/
 dist/
+*.spec
+dmg_temp/
 
 # Virtual Environment
 venv/
 env/
 ENV/
+.env
+.venv
 
 # IDE
 .idea/
@@ -39,7 +43,6 @@ ENV/
 .DS_Store
 .AppleDouble
 .LSOverride
-Icon?
 ._*
 
 # Logs
