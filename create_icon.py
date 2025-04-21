@@ -1,35 +1,59 @@
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import os
+import shutil
+import subprocess
 
-# Create the iconset directory if it doesn't exist
-iconset_dir = "network_security_tool/data/icon.iconset"
-os.makedirs(iconset_dir, exist_ok=True)
-
-# Open the source image
-img = Image.open("network_security_tool/data/app_icon.png")
-
-# Define the required sizes for macOS icons
-icon_sizes = [
-    (16, 16),
-    (32, 32),
-    (64, 64),
-    (128, 128),
-    (256, 256),
-    (512, 512),
-    (1024, 1024)
-]
-
-# Generate icons for each size
-for size in icon_sizes:
-    resized = img.resize(size, Image.Resampling.LANCZOS)
-    filename = f"icon_{size[0]}x{size[0]}.png"
-    resized.save(os.path.join(iconset_dir, filename))
+def create_base_icon():
+    print("Creating base icon...")
+    # Create a 1024x1024 image with a blue background (largest required size)
+    size = 1024
+    image = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
     
-    # Generate @2x version if needed
-    if size[0] <= 512:
-        filename = f"icon_{size[0]}x{size[0]}@2x.png"
-        double_size = (size[0] * 2, size[0] * 2)
-        resized = img.resize(double_size, Image.Resampling.LANCZOS)
-        resized.save(os.path.join(iconset_dir, filename))
+    # Draw a blue circle
+    draw.ellipse([0, 0, size, size], fill=(0, 120, 215, 255))
+    
+    # Add NST text
+    try:
+        # Try to use system font
+        font = ImageFont.truetype("Arial", int(size * 0.4))
+    except:
+        # Fallback to default font
+        print("Falling back to default font...")
+        font = ImageFont.load_default()
+    
+    # Calculate text position to center it
+    text = "NST"
+    text_bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = text_bbox[2] - text_bbox[0]
+    text_height = text_bbox[3] - text_bbox[1]
+    x = (size - text_width) // 2
+    y = (size - text_height) // 2
+    
+    # Draw white text
+    draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
+    
+    return image
 
-print("Icon files generated successfully") 
+def create_icon():
+    # Create base icon
+    base_icon = create_base_icon()
+    
+    # Save the largest size as PNG first
+    print("Saving base icon...")
+    base_icon.save('icon_1024.png')
+    
+    print("Converting to ICNS format using sips...")
+    try:
+        subprocess.run(['sips', '-s', 'format', 'icns', 'icon_1024.png', '--out', 'icon.icns'], 
+                      check=True, capture_output=True, text=True)
+        print("Successfully created icon.icns")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to create ICNS file: {e.stderr}")
+    finally:
+        # Clean up the temporary PNG
+        if os.path.exists('icon_1024.png'):
+            os.remove('icon_1024.png')
+
+if __name__ == '__main__':
+    create_icon() 

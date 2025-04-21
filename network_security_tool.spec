@@ -6,26 +6,21 @@ a = Analysis(
     ['network_security_tool/__main__.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        ('network_security_tool/data', 'data'),
-    ],
+    datas=[],
     hiddenimports=[
+        'PyQt6.sip',
         'PyQt6.QtCore',
-        'PyQt6.QtWidgets',
         'PyQt6.QtGui',
-        'scapy.all',
-        'nmap',
-        'whois',
-        'dns',
-        'dns.resolver',
+        'PyQt6.QtWidgets',
+        'OpenSSL',
+        'netifaces',
+        'passlib',
         'cryptography',
-        'requests',
-        'network_security_tool.gui',
-        'network_security_tool.scanner',
-        'network_security_tool.sniffer',
-        'network_security_tool.analysis',
-        'network_security_tool.generator',
-        'network_security_tool.cracker',
+        'scapy',
+        'scapy.layers.all',
+        'nmap',
+        'dns',
+        'whois'
     ],
     hookspath=[],
     hooksconfig={},
@@ -33,15 +28,11 @@ a = Analysis(
     excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
-    cipher=block_cipher,
+    cipher=None,
     noarchive=False,
 )
 
-pyz = PYZ(
-    a.pure,
-    a.zipped_data,
-    cipher=block_cipher
-)
+pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
 exe = EXE(
     pyz,
@@ -55,32 +46,31 @@ exe = EXE(
     upx=True,
     console=False,
     disable_windowed_traceback=False,
-    argv_emulation=True,
-    target_arch='x86_64',
+    argv_emulation=False,
+    target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='network_security_tool/data/app_icon.icns',
 )
 
-app = BUNDLE(
+coll = COLLECT(
     exe,
     a.binaries,
     a.zipfiles,
     a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='Network Security Tool',
+)
+
+app = BUNDLE(
+    coll,
     name='Network Security Tool.app',
-    icon='network_security_tool/data/app_icon.icns',
-    bundle_identifier='com.networksecurity.tool',
+    icon='network_security_tool_icon.icns',
     info_plist={
-        'NSHighResolutionCapable': 'True',
-        'LSBackgroundOnly': 'False',
-        'NSRequiresAquaSystemAppearance': 'False',
         'CFBundleShortVersionString': '1.0.0',
         'CFBundleVersion': '1.0.0',
-        'CFBundleName': 'Network Security Tool',
-        'CFBundleDisplayName': 'Network Security Tool',
-        'CFBundleGetInfoString': 'Network Security Tool',
-        'CFBundleIdentifier': 'com.networksecurity.tool',
-        'NSAppleEventsUsageDescription': 'This app requires access to run system commands.',
-        'NSSystemAdministrationUsageDescription': 'This app requires administrative privileges for network operations.',
+        'NSHighResolutionCapable': 'True'
     },
+    bundle_identifier=None,
 ) 

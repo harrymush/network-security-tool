@@ -1,91 +1,78 @@
 # Network Security Tool
 
-A comprehensive network security toolkit built with Python and PyQt6, offering various network analysis and security testing features.
+A comprehensive network security analysis tool with a modern GUI interface.
 
 ## Features
 
-### Network Tools
-- **Port Scanner**
-  - Multiple scan types (TCP Connect, SYN, Stealth)
-  - Custom port ranges and presets
-  - Service detection and banner grabbing
-  - Multi-threaded scanning
-  - Support for multiple targets (IP/hostname)
+- **Network Scanner**
+  - IP range scanning
+  - Port scanning
+  - Host discovery
+  - Service detection
+  - Real-time results
 
 - **DNS Tools**
-  - DNS record lookup (A, AAAA, MX, NS, etc.)
-  - WHOIS lookup
-  - Comprehensive results display
+  - DNS record lookup
+  - Reverse DNS lookup
+  - WHOIS information
+  - Domain analysis
 
-### Packet Sniffer
-- Real-time packet capture and analysis
-- BPF filter support
-- Network interface selection
-- Detailed packet information display
-- Traffic statistics tracking
+- **SSL/TLS Analyzer**
+  - Certificate inspection
+  - Protocol detection
+  - Security assessment
+  - Vulnerability checking
 
-### Vulnerability Scanner
-- Target URL scanning
-- Configurable scan options
-- Severity-based results
-- Progress tracking
-- Detailed vulnerability reporting
-
-### Password Tools
-- **Password Generator**
-  - Customizable password length
-  - Character set selection
-  - Copy to clipboard functionality
-  - Password strength indicators
+- **Password Tools**
+  - Password strength analysis
+  - Hash cracking
+  - Password generation
+  - Security recommendations
 
 ## Installation
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/harrymush/network-security-tool.git
+git clone https://github.com/yourusername/network-security-tool.git
 cd network-security-tool
 ```
 
-2. Create and activate a virtual environment:
+2. Install the package:
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ## Usage
 
 Run the application:
 ```bash
-python main.py
+network-security-tool
 ```
 
-## Building
-
-To create a standalone executable:
+Or directly from the source:
 ```bash
-pyinstaller --clean network_security_tool.spec
+python -m network_security_tool
 ```
-
-The built application will be available in the `dist` directory.
 
 ## Requirements
-- Python 3.x
-- PyQt6
-- Scapy
-- nmap-python
-- dnspython
-- requests
 
-## Note
-Some features may require root/administrator privileges to function properly, particularly the packet sniffer and certain port scanning options.
+- Python 3.8 or higher
+- PyQt6
+- python-nmap
+- dnspython
+- python-whois
+- cryptography
+- requests
+- scapy
 
 ## License
+
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Disclaimer
-This tool should only be used in compliance with all applicable laws and regulations. The authors are not responsible for any misuse or damage caused by this program. This software is for educational and testing purposes only.
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Security
+
+This tool is designed for educational and testing purposes only. Use responsibly and only on networks you have permission to scan.

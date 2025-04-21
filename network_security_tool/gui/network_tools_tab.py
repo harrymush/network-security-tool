@@ -33,9 +33,6 @@ class NetworkToolsTab(QWidget):
         # Add Network Scanner Tab
         self.tab_widget.addTab(self.create_network_scanner_tab(), "Network Scanner")
         
-        # Add SSL/TLS Analyzer Tab
-        self.tab_widget.addTab(self.create_ssl_analyzer_tab(), "SSL/TLS Analyzer")
-        
         # Add DNS Tools Tab
         self.tab_widget.addTab(self.create_dns_tools_tab(), "DNS Tools")
         
@@ -69,6 +66,15 @@ class NetworkToolsTab(QWidget):
         timeout_layout.addWidget(self.timeout_spin)
         input_layout.addLayout(timeout_layout)
         
+        # Scan options
+        options_layout = QHBoxLayout()
+        self.quick_scan_check = QCheckBox("Quick Scan (Ping Only)")
+        self.quick_scan_check.setChecked(False)
+        self.quick_scan_check.setToolTip("Only perform ping scan without port scanning")
+        options_layout.addWidget(self.quick_scan_check)
+        options_layout.addStretch()
+        input_layout.addLayout(options_layout)
+        
         input_group.setLayout(input_layout)
         layout.addWidget(input_group)
         
@@ -88,12 +94,32 @@ class NetworkToolsTab(QWidget):
         progress_group = QGroupBox("Progress")
         progress_layout = QVBoxLayout()
         
+        # Main progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         progress_layout.addWidget(self.progress_bar)
         
+        # Status text
         self.status_label = QLabel("Ready")
         progress_layout.addWidget(self.status_label)
+        
+        # Detailed progress
+        self.detailed_progress = QTextEdit()
+        self.detailed_progress.setReadOnly(True)
+        self.detailed_progress.setMaximumHeight(100)
+        self.detailed_progress.setStyleSheet("font-family: monospace;")
+        progress_layout.addWidget(self.detailed_progress)
+        
+        # Stats display
+        stats_layout = QHBoxLayout()
+        self.hosts_scanned_label = QLabel("Hosts Scanned: 0")
+        self.active_hosts_label = QLabel("Active Hosts: 0")
+        self.open_ports_label = QLabel("Open Ports: 0")
+        stats_layout.addWidget(self.hosts_scanned_label)
+        stats_layout.addWidget(self.active_hosts_label)
+        stats_layout.addWidget(self.open_ports_label)
+        stats_layout.addStretch()
+        progress_layout.addLayout(stats_layout)
         
         progress_group.setLayout(progress_layout)
         layout.addWidget(progress_group)
@@ -102,61 +128,38 @@ class NetworkToolsTab(QWidget):
         results_group = QGroupBox("Results")
         results_layout = QVBoxLayout()
         
+        # Add filter controls
+        filter_layout = QHBoxLayout()
+        self.show_active_check = QCheckBox("Show Active Hosts")
+        self.show_active_check.setChecked(True)
+        self.show_active_check.stateChanged.connect(self.filter_results)
+        
+        self.show_inactive_check = QCheckBox("Show Inactive Hosts")
+        self.show_inactive_check.setChecked(True)
+        self.show_inactive_check.stateChanged.connect(self.filter_results)
+        
+        filter_layout.addWidget(self.show_active_check)
+        filter_layout.addWidget(self.show_inactive_check)
+        filter_layout.addStretch()
+        results_layout.addLayout(filter_layout)
+        
+        # Results table
         self.results_table = QTableWidget()
-        self.results_table.setColumnCount(3)
-        self.results_table.setHorizontalHeaderLabels(["IP Address", "Hostname", "Status"])
+        self.results_table.setColumnCount(4)
+        self.results_table.setHorizontalHeaderLabels(["IP Address", "Hostname", "Status", "Open Ports"])
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         results_layout.addWidget(self.results_table)
         
         results_group.setLayout(results_layout)
         layout.addWidget(results_group)
         
-        tab.setLayout(layout)
-        return tab
-        
-    def create_ssl_analyzer_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout()
-        
-        # Target input
-        target_group = QGroupBox("Target Settings")
-        target_layout = QVBoxLayout()
-        
-        target_input_layout = QHBoxLayout()
-        target_label = QLabel("Host:")
-        self.ssl_host_input = QLineEdit()
-        self.ssl_host_input.setPlaceholderText("e.g., example.com")
-        target_input_layout.addWidget(target_label)
-        target_input_layout.addWidget(self.ssl_host_input)
-        target_layout.addLayout(target_input_layout)
-        
-        port_layout = QHBoxLayout()
-        port_label = QLabel("Port:")
-        self.ssl_port_spin = QSpinBox()
-        self.ssl_port_spin.setRange(1, 65535)
-        self.ssl_port_spin.setValue(443)
-        port_layout.addWidget(port_label)
-        port_layout.addWidget(self.ssl_port_spin)
-        target_layout.addLayout(port_layout)
-        
-        target_group.setLayout(target_layout)
-        layout.addWidget(target_group)
-        
-        # Analyze button
-        analyze_btn = QPushButton("Analyze SSL/TLS")
-        analyze_btn.clicked.connect(self.analyze_ssl)
-        layout.addWidget(analyze_btn)
-        
-        # Results section
-        results_group = QGroupBox("Analysis Results")
-        results_layout = QVBoxLayout()
-        
-        self.ssl_results = QTextEdit()
-        self.ssl_results.setReadOnly(True)
-        results_layout.addWidget(self.ssl_results)
-        
-        results_group.setLayout(results_layout)
-        layout.addWidget(results_group)
+        # Store original results and stats
+        self.original_results = []
+        self.scan_stats = {
+            'hosts_scanned': 0,
+            'active_hosts': 0,
+            'open_ports': 0
+        }
         
         tab.setLayout(layout)
         return tab
@@ -215,7 +218,14 @@ class NetworkToolsTab(QWidget):
             QMessageBox.warning(self, "Warning", "Please enter a network range")
             return
             
+        # Reset stats and display
+        self.scan_stats = {'hosts_scanned': 0, 'active_hosts': 0, 'open_ports': 0}
+        self.detailed_progress.clear()
+        self.results_table.setRowCount(0)
+        self.original_results = []
+        
         timeout = self.timeout_spin.value()
+        quick_scan = self.quick_scan_check.isChecked()
         
         self.start_scan_btn.setEnabled(False)
         self.stop_scan_btn.setEnabled(True)
@@ -223,8 +233,9 @@ class NetworkToolsTab(QWidget):
         self.status_label.setText("Starting scan...")
         
         # Start scan in a separate thread
-        self.scan_thread = NetworkScanThread(network_range, timeout)
+        self.scan_thread = NetworkScanThread(network_range, timeout, quick_scan)
         self.scan_thread.progress_updated.connect(self.update_network_scan_progress)
+        self.scan_thread.result_received.connect(self.handle_scan_result)
         self.scan_thread.scan_complete.connect(self.handle_network_scan_complete)
         self.scan_thread.start()
         
@@ -236,69 +247,78 @@ class NetworkToolsTab(QWidget):
             self.status_label.setText("Scan stopped")
             
     def update_network_scan_progress(self, value, message):
+        """Update the progress display with detailed information"""
         self.progress_bar.setValue(value)
         self.status_label.setText(message)
         
-    def handle_network_scan_complete(self, results):
-        self.start_scan_btn.setEnabled(True)
-        self.stop_scan_btn.setEnabled(False)
-        self.progress_bar.setValue(100)
+        # Add timestamp to detailed progress
+        timestamp = time.strftime("%H:%M:%S")
+        self.detailed_progress.append(f"[{timestamp}] {message}")
         
-        self.results_table.setRowCount(len(results))
-        for i, result in enumerate(results):
+        # Auto-scroll to bottom
+        self.detailed_progress.verticalScrollBar().setValue(
+            self.detailed_progress.verticalScrollBar().maximum()
+        )
+        
+    def update_scan_stats(self, result):
+        """Update the scan statistics display"""
+        if 'error' not in result:
+            self.scan_stats['hosts_scanned'] += 1
+            if result.get('status') == 'up':
+                self.scan_stats['active_hosts'] += 1
+                self.scan_stats['open_ports'] += len(result.get('open_ports', []))
+                
+        self.hosts_scanned_label.setText(f"Hosts Scanned: {self.scan_stats['hosts_scanned']}")
+        self.active_hosts_label.setText(f"Active Hosts: {self.scan_stats['active_hosts']}")
+        self.open_ports_label.setText(f"Open Ports: {self.scan_stats['open_ports']}")
+        
+    def handle_scan_result(self, result):
+        """Handle individual scan results as they come in"""
+        self.original_results.append(result)
+        self.update_scan_stats(result)
+        self.filter_results()  # Update the filtered view
+        
+    def filter_results(self):
+        """Filter the results table based on the checkbox states"""
+        if not self.original_results:
+            return
+            
+        # Clear the table
+        self.results_table.setRowCount(0)
+        
+        # Filter results based on checkbox states
+        filtered_results = []
+        for result in self.original_results:
+            if 'error' in result:
+                continue
+                
+            status = result.get('status', '')
+            if status == 'up' and self.show_active_check.isChecked():
+                filtered_results.append(result)
+            elif status == 'down' and self.show_inactive_check.isChecked():
+                filtered_results.append(result)
+                
+        # Update the table with filtered results
+        self.results_table.setRowCount(len(filtered_results))
+        for i, result in enumerate(filtered_results):
             self.results_table.setItem(i, 0, QTableWidgetItem(result['ip']))
             self.results_table.setItem(i, 1, QTableWidgetItem(result.get('hostname', '')))
             self.results_table.setItem(i, 2, QTableWidgetItem(result['status']))
             
-    def analyze_ssl(self):
-        host = self.ssl_host_input.text()
-        if not host:
-            QMessageBox.warning(self, "Warning", "Please enter a host")
-            return
+            # Format open ports
+            ports = result.get('open_ports', [])
+            if ports:
+                port_text = ', '.join(str(p['port']) for p in ports)
+            else:
+                port_text = ''
+            self.results_table.setItem(i, 3, QTableWidgetItem(port_text))
             
-        port = self.ssl_port_spin.value()
-        
-        self.ssl_results.clear()
-        self.ssl_results.append("Analyzing SSL/TLS configuration...")
-        
-        # Start analysis in a separate thread
-        self.ssl_analyzer_thread = SSLAnalyzerThread(host, port)
-        self.ssl_analyzer_thread.result_received.connect(self.handle_ssl_result)
-        self.ssl_analyzer_thread.analysis_complete.connect(self.handle_ssl_analysis_complete)
-        self.ssl_analyzer_thread.start()
-        
-    def handle_ssl_result(self, result):
-        """Handle SSL/TLS analysis results."""
-        if "error" in result:
-            self.ssl_results.append(f"Error: {result['error']}")
-            return
-            
-        # Format the result based on its type
-        if result.get('type') == 'certificate':
-            self.ssl_results.append("\nCertificate Information:")
-            self.ssl_results.append(f"Subject: {result.get('subject', '')}")
-            self.ssl_results.append(f"Issuer: {result.get('issuer', '')}")
-            self.ssl_results.append(f"Valid From: {result.get('valid_from', '')}")
-            self.ssl_results.append(f"Valid Until: {result.get('valid_until', '')}")
-            self.ssl_results.append(f"Serial Number: {result.get('serial_number', '')}")
-        elif result.get('type') == 'protocol':
-            self.ssl_results.append("\nSupported Protocols:")
-            for proto in result.get('protocols', []):
-                self.ssl_results.append(f"- {proto}")
-        elif result.get('type') == 'cipher':
-            self.ssl_results.append("\nSupported Cipher Suites:")
-            for cipher in result.get('ciphers', []):
-                self.ssl_results.append(f"- {cipher}")
-        elif result.get('type') == 'security':
-            self.ssl_results.append("\nSecurity Analysis:")
-            for issue in result.get('issues', []):
-                self.ssl_results.append(f"- {issue}")
-            for strength in result.get('strengths', []):
-                self.ssl_results.append(f"+ {strength}")
-
-    def handle_ssl_analysis_complete(self):
-        """Handle completion of SSL/TLS analysis."""
-        self.ssl_results.append("\nAnalysis complete")
+    def handle_network_scan_complete(self, results):
+        self.start_scan_btn.setEnabled(True)
+        self.stop_scan_btn.setEnabled(False)
+        self.progress_bar.setValue(100)
+        self.status_label.setText("Scan complete")
+        self.detailed_progress.append("\nScan completed successfully")
         
     def query_dns(self):
         domain = self.domain_input.text()
@@ -347,11 +367,13 @@ class NetworkToolsTab(QWidget):
 class NetworkScanThread(QThread):
     progress_updated = pyqtSignal(int, str)
     scan_complete = pyqtSignal(list)
+    result_received = pyqtSignal(dict)
     
-    def __init__(self, network_range, timeout):
+    def __init__(self, network_range, timeout, quick_scan):
         super().__init__()
         self.network_range = network_range
         self.timeout = timeout
+        self.quick_scan = quick_scan
         self._is_running = True
         
     def run(self):
@@ -360,7 +382,9 @@ class NetworkScanThread(QThread):
             results = scanner.scan_network(
                 self.network_range,
                 self.timeout,
-                self.progress_callback
+                self.progress_callback,
+                self.quick_scan,
+                self.result_callback
             )
             self.scan_complete.emit(results)
         except Exception as e:
@@ -372,25 +396,17 @@ class NetworkScanThread(QThread):
     def progress_callback(self, progress, message):
         if self._is_running:
             self.progress_updated.emit(progress, message)
-
-class SSLAnalyzerThread(QThread):
-    result_received = pyqtSignal(dict)
-    analysis_complete = pyqtSignal()
-    
-    def __init__(self, host, port):
-        super().__init__()
-        self.host = host
-        self.port = port
-        
-    def run(self):
-        try:
-            analyzer = SSLAnalyzer()
-            results = analyzer.analyze_ssl(self.host, self.port)
-            for result in results:
-                self.result_received.emit(result)
-            self.analysis_complete.emit()
-        except Exception as e:
-            self.result_received.emit({"error": str(e)})
+            
+    def result_callback(self, result):
+        """Callback for individual scan results"""
+        if self._is_running:
+            self.result_received.emit(result)
+            
+    def handle_scan_result(self, result):
+        """Handle individual scan results as they come in"""
+        self.original_results.append(result)
+        self.update_scan_stats(result)
+        self.filter_results()  # Update the filtered view
 
 class DNSQueryThread(QThread):
     result_received = pyqtSignal(dict)

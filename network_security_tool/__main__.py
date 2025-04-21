@@ -1,12 +1,6 @@
-import sys
-from PyQt6.QtWidgets import QApplication
-from network_security_tool.gui.main_window import MainWindow
+#!/usr/bin/env python3
 
-def main():
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
+from network_security_tool.gui.main_window import main
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main() 

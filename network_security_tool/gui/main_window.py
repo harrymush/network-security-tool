@@ -1,61 +1,77 @@
-from PyQt6.QtWidgets import QMainWindow, QTabWidget, QWidget, QVBoxLayout
-from PyQt6.QtCore import Qt
-from network_security_tool.gui.password_tools_tab import PasswordToolsTab
-from network_security_tool.gui.web_cracker_tab import WebCrackerTab
-from network_security_tool.gui.network_tools_tab import NetworkToolsTab
-from network_security_tool.gui.packet_sniffer_tab import PacketSnifferTab
-from network_security_tool.gui.vulnerability_scanner_tab import VulnerabilityScannerTab
-from network_security_tool.gui.port_scanner_tab import PortScannerTab
+from PyQt6.QtWidgets import QMainWindow, QTabWidget, QApplication
+from PyQt6.QtCore import Qt, QObject, QSettings
+import sys
 import platform
+import os
+
+# Import our tab modules
+from .network_tools_tab import NetworkToolsTab
+from .packet_sniffer_tab import PacketSnifferTab
+from .vulnerability_scanner_tab import VulnerabilityScannerTab
+from .password_tools_tab import PasswordToolsTab
+from .web_cracker_tab import WebCrackerTab
+from .ssl_analyzer_tab import SSLAnalyzerTab
+
+class AppDelegate(QObject):
+    def __init__(self):
+        super().__init__()
+        # Ensure we're not using state restoration
+        if platform.system() == 'Darwin':
+            settings = QSettings()
+            settings.setValue("NSQuitAlwaysKeepsWindows", False)
+            settings.sync()
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        
         self.setWindowTitle("Network Security Tool")
-        self.setGeometry(100, 100, 1200, 800)
-        
-        # Set keyboard input handling for macOS
-        if platform.system() == 'Darwin':
-            self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
-        
-        # Create central widget and layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
-        
+        self.setMinimumSize(800, 600)
+
         # Create tab widget
-        self.tab_widget = QTabWidget()
-        layout.addWidget(self.tab_widget)
-        
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
+
         # Add tabs
         self.add_tab("Network Tools", NetworkToolsTab())
-        self.add_tab("Port Scanner", PortScannerTab())
         self.add_tab("Packet Sniffer", PacketSnifferTab())
+        self.add_tab("SSL/TLS Analyzer", SSLAnalyzerTab())
         self.add_tab("Vulnerability Scanner", VulnerabilityScannerTab())
         self.add_tab("Password Tools", PasswordToolsTab())
         self.add_tab("Web Cracker", WebCrackerTab())
-        
+
     def add_tab(self, name, widget):
-        self.tab_widget.addTab(widget, name)
+        self.tabs.addTab(widget, name)
+
+def main():
+    # Disable state restoration before creating QApplication
+    if platform.system() == 'Darwin':
+        os.environ['OBJC_DISABLE_APP_RESUME'] = 'YES'
+        os.environ['OBJC_DISABLE_STATE_RESTORATION'] = 'YES'
+    
+    app = QApplication(sys.argv)
+    
+    # Set up application metadata
+    app.setApplicationName("Network Security Tool")
+    app.setOrganizationName("NetworkSecurity")
+    app.setOrganizationDomain("networksecurity.tool")
+    
+    # Set up macOS specific configuration
+    if platform.system() == 'Darwin':
+        # Create and set application delegate
+        delegate = AppDelegate()
+        app.setProperty("NSApplicationDelegate", delegate)
         
-    def keyPressEvent(self, event):
-        """Handle keyboard input events."""
-        if platform.system() == 'Darwin':
-            # Handle special characters for German keyboard
-            if event.key() == Qt.Key.Key_At:
-                self.handle_special_character('@')
-            elif event.key() == Qt.Key.Key_NumberSign:
-                self.handle_special_character('#')
-            elif event.key() == Qt.Key.Key_QuoteLeft:
-                self.handle_special_character('`')
-            else:
-                super().keyPressEvent(event)
-        else:
-            super().keyPressEvent(event)
-            
-    def handle_special_character(self, char):
-        """Handle special character input."""
-        # Get the current focused widget
-        focused_widget = self.focusWidget()
-        if focused_widget and hasattr(focused_widget, 'insert'):
-            focused_widget.insert(char) 
+        # Disable native menu bar and control/meta key swap
+        app.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeMenuBar)
+        app.setAttribute(Qt.ApplicationAttribute.AA_MacDontSwapCtrlAndMeta)
+        
+        # Disable automatic window tabbing
+        if hasattr(app, 'setDesktopFileName'):
+            app.setDesktopFileName('network-security-tool')
+    
+    # Create and show the main window
+    window = MainWindow()
+    window.show()
+    
+    sys.exit(app.exec()) 

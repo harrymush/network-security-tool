@@ -13,6 +13,7 @@ import threading
 import queue
 import time
 import hashlib
+from pathlib import Path
 
 class PasswordToolsTab(QWidget):
     def __init__(self):
@@ -383,14 +384,29 @@ class PasswordToolsTab(QWidget):
         attack_layout = QVBoxLayout()
         
         # Dictionary attack
-        dictionary_layout = QHBoxLayout()
-        self.dictionary_btn = QPushButton("Select Dictionary File")
-        self.dictionary_btn.clicked.connect(self.select_dictionary)
-        dictionary_layout.addWidget(self.dictionary_btn)
+        dictionary_layout = QVBoxLayout()
         
+        # Dictionary selection
+        dictionary_select_layout = QHBoxLayout()
+        dictionary_label = QLabel("Dictionary:")
+        self.dictionary_combo = QComboBox()
+        self.dictionary_combo.addItems(["rockyou.txt", "common_passwords.txt", "custom"])
+        self.dictionary_combo.currentTextChanged.connect(self.handle_dictionary_selection)
+        dictionary_select_layout.addWidget(dictionary_label)
+        dictionary_select_layout.addWidget(self.dictionary_combo)
+        dictionary_layout.addLayout(dictionary_select_layout)
+        
+        # Custom dictionary path
+        custom_dict_layout = QHBoxLayout()
+        self.dictionary_btn = QPushButton("Select Custom Dictionary")
+        self.dictionary_btn.clicked.connect(self.select_dictionary)
+        self.dictionary_btn.setEnabled(False)
         self.dictionary_path = QLineEdit()
         self.dictionary_path.setReadOnly(True)
-        dictionary_layout.addWidget(self.dictionary_path)
+        self.dictionary_path.setEnabled(False)
+        custom_dict_layout.addWidget(self.dictionary_btn)
+        custom_dict_layout.addWidget(self.dictionary_path)
+        dictionary_layout.addLayout(custom_dict_layout)
         
         attack_layout.addLayout(dictionary_layout)
         
@@ -568,11 +584,17 @@ class PasswordToolsTab(QWidget):
     def generate_passphrase(self):
         word_count = self.word_count_spin.value()
         separator = self.separator_input.text()
+        use_numbers = self.numbers_check.isChecked()
+        use_special = self.special_check.isChecked()
+        capitalize = self.capitalize_check.isChecked()
         
         generator = PassphraseGenerator()
         passphrase = generator.generate_passphrase(
             word_count=word_count,
-            separator=separator
+            separator=separator,
+            use_numbers=use_numbers,
+            use_special=use_special,
+            capitalize=capitalize
         )
         
         self.generated_passphrase.setText(passphrase)
@@ -587,17 +609,42 @@ class PasswordToolsTab(QWidget):
         if file_path:
             self.dictionary_path.setText(file_path)
             
+    def handle_dictionary_selection(self, text):
+        """Handle dictionary selection from dropdown"""
+        if text == "custom":
+            self.dictionary_btn.setEnabled(True)
+            self.dictionary_path.setEnabled(True)
+        else:
+            self.dictionary_btn.setEnabled(False)
+            self.dictionary_path.setEnabled(False)
+            self.dictionary_path.clear()
+            
     def start_cracking(self):
-        hash_value = self.hash_input.text()
+        hash_value = self.hash_input.text().strip()
         if not hash_value:
             QMessageBox.warning(self, "Warning", "Please enter a hash to crack")
             return
             
-        hash_type = self.hash_type_combo.currentText()
-        dictionary_path = self.dictionary_path.text()
+        hash_type = self.hash_type_combo.currentText().lower()
         
+        # Get dictionary path
+        selected_dict = self.dictionary_combo.currentText()
+        dictionary_path = None
+        
+        if selected_dict == "custom":
+            dictionary_path = self.dictionary_path.text()
+            if not dictionary_path:
+                QMessageBox.warning(self, "Warning", "Please select a custom dictionary file")
+                return
+        else:
+            # Use built-in dictionary
+            dictionary_path = str(Path(__file__).parent.parent / "dictionaries" / selected_dict)
+            if not Path(dictionary_path).exists():
+                QMessageBox.warning(self, "Warning", f"Dictionary file {selected_dict} not found")
+                return
+                
         if not dictionary_path and not self.brute_force_check.isChecked():
-            QMessageBox.warning(self, "Warning", "Please select a dictionary file or enable brute force")
+            QMessageBox.warning(self, "Warning", "Please select a dictionary or enable brute force")
             return
             
         self.start_btn.setEnabled(False)
@@ -615,6 +662,7 @@ class PasswordToolsTab(QWidget):
         )
         self.cracker_thread.progress_updated.connect(self.update_progress)
         self.cracker_thread.crack_complete.connect(self.handle_crack_complete)
+        self.cracker_thread.error_occurred.connect(self.handle_error)
         self.cracker_thread.start()
         
     def stop_cracking(self):
@@ -631,16 +679,22 @@ class PasswordToolsTab(QWidget):
     def handle_crack_complete(self, results):
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.progress_bar.setValue(100)
         
-        if results:
-            self.results_table.setRowCount(1)
-            self.results_table.setItem(0, 0, QTableWidgetItem(results['hash']))
-            self.results_table.setItem(0, 1, QTableWidgetItem(results['password']))
-            self.status_label.setText("Password found!")
+        if results['success']:  # Password found
+            self.status_label.setText(f"Password found: {results['password']}")
+            self.progress_bar.setValue(100)
+            QMessageBox.information(self, "Success", f"Password found: {results['password']}\nTime taken: {results['time_taken']:.2f} seconds")
         else:
             self.status_label.setText("Password not found")
+            self.progress_bar.setValue(100)
+            QMessageBox.information(self, "Result", "Password not found")
             
+    def handle_error(self, error_message):
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.status_label.setText("Error occurred")
+        QMessageBox.critical(self, "Error", f"An error occurred: {error_message}")
+        
     def convert_to_hash(self):
         text = self.text_input.text()
         if not text:
@@ -708,6 +762,7 @@ class PasswordToolsTab(QWidget):
 class CrackerThread(QThread):
     progress_updated = pyqtSignal(int, str)
     crack_complete = pyqtSignal(dict)
+    error_occurred = pyqtSignal(str)
     
     def __init__(self, hash_value, hash_type, dictionary_path, use_brute_force, max_length):
         super().__init__()
@@ -721,17 +776,27 @@ class CrackerThread(QThread):
     def run(self):
         try:
             cracker = PasswordCracker()
-            results = cracker.crack_password(
+            success, result, time_taken = cracker.crack_password(
                 self.hash_value,
                 self.hash_type,
                 self.dictionary_path,
-                self.use_brute_force,
                 self.max_length,
+                self.use_brute_force,
                 self.progress_callback
             )
-            self.crack_complete.emit(results)
+            
+            # Convert tuple result to dictionary
+            results_dict = {
+                'success': success,
+                'password': result if success else None,
+                'time_taken': time_taken,
+                'message': result if not success else 'Password found'
+            }
+            
+            self.crack_complete.emit(results_dict)
         except Exception as e:
             self.progress_updated.emit(0, f"Error: {str(e)}")
+            self.error_occurred.emit(str(e))
             
     def stop(self):
         self._is_running = False
