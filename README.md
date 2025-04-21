@@ -19,7 +19,7 @@ A comprehensive network security analysis tool with a modern GUI interface.
   - Detailed packet analysis
   - Statistics tracking
 
-- **SSL/TLS Analyzer**
+- **SSL/TLS Analyzer** (warning: issue with this tool)
   - Certificate inspection and validation
   - Protocol detection and analysis
   - Security assessment
@@ -54,18 +54,12 @@ A comprehensive network security analysis tool with a modern GUI interface.
     - Multiple hash algorithm support (MD5, SHA1, SHA256, SHA512)
     - Copy to clipboard functionality
 
-- **Web Security Tools**
-  - Web application security scanning
-  - Proxy functionality
-  - Custom port configuration
-  - URL analysis
-
-- **Web Cracker**
-  - Form-based authentication testing
-  - Multiple attack strategies
-  - Custom wordlist support
-  - Multi-threaded operations
-  - Real-time progress monitoring
+  - **Web Cracker**
+    - Form-based authentication testing
+    - Multiple attack strategies
+    - Custom wordlist support
+    - Multi-threaded operations
+    - Real-time progress monitoring
 
 ## Installation
 
