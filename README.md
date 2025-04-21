@@ -1,49 +1,44 @@
 # Network Security Tool
 
-A comprehensive network security toolkit built with Python and PyQt6, providing various network analysis and security testing features.
+A comprehensive network security toolkit built with Python and PyQt6, offering various network analysis and security testing features.
 
 ## Features
 
-- **Network Tools**
-  - Port Scanner (TCP/UDP scanning with service detection)
-  - DNS Tools (DNS queries and WHOIS lookup)
-  - Network Interface Information
+### Network Tools
+- **Port Scanner**
+  - Multiple scan types (TCP Connect, SYN, Stealth)
+  - Custom port ranges and presets
+  - Service detection and banner grabbing
+  - Multi-threaded scanning
+  - Support for multiple targets (IP/hostname)
 
-- **Packet Sniffer**
-  - Real-time packet capture
-  - BPF filter support
-  - Detailed packet analysis
-  - Statistics tracking
+- **DNS Tools**
+  - DNS record lookup (A, AAAA, MX, NS, etc.)
+  - WHOIS lookup
+  - Comprehensive results display
 
-- **Vulnerability Scanner**
-  - Target URL scanning
-  - Multiple scan types
-  - Severity-based results
-  - Progress tracking
+### Packet Sniffer
+- Real-time packet capture and analysis
+- BPF filter support
+- Network interface selection
+- Detailed packet information display
+- Traffic statistics tracking
 
-- **Password Tools**
-  - Password Generator (customizable options)
-  - Password Strength Analyzer
-  - Password Cracker (Note: Currently experiencing issues - for educational purposes only)
+### Vulnerability Scanner
+- Target URL scanning
+- Configurable scan options
+- Severity-based results
+- Progress tracking
+- Detailed vulnerability reporting
 
-- **Web Security Tools**
-  - Web Crawler
-  - Basic vulnerability testing
-  - SSL/TLS analysis
+### Password Tools
+- **Password Generator**
+  - Customizable password length
+  - Character set selection
+  - Copy to clipboard functionality
+  - Password strength indicators
 
 ## Installation
-
-### macOS
-
-1. Download the latest release `Network Security Tool.dmg`
-2. Mount the DMG file by double-clicking it
-3. Drag the Network Security Tool application to your Applications folder
-4. Eject the DMG
-5. Launch the application from your Applications folder
-
-Note: You may need to allow the application in System Preferences > Security & Privacy when first launching.
-
-### From Source
 
 1. Clone the repository:
 ```bash
@@ -51,32 +46,46 @@ git clone https://github.com/yourusername/network-security-tool.git
 cd network-security-tool
 ```
 
-2. Install dependencies:
+2. Create and activate a virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Run the application:
+## Usage
+
+Run the application:
 ```bash
-python -m network_security_tool
+python main.py
 ```
 
-## Requirements
+## Building
 
-- Python 3.8+
+To create a standalone executable:
+```bash
+pyinstaller --clean network_security_tool.spec
+```
+
+The built application will be available in the `dist` directory.
+
+## Requirements
+- Python 3.x
 - PyQt6
 - Scapy
-- nmap
-- Additional dependencies listed in requirements.txt
+- nmap-python
+- dnspython
+- requests
 
-## Known Issues
-
-- The Password Cracker module is currently experiencing functionality issues. This feature is provided for educational purposes only and will be fixed in a future update.
-
-## Disclaimer
-
-This tool is intended for educational purposes and authorized security testing only. Users are responsible for ensuring they have permission to test target systems and comply with all applicable laws and regulations.
+## Note
+Some features may require root/administrator privileges to function properly, particularly the packet sniffer and certain port scanning options.
 
 ## License
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+## Disclaimer
+This tool is for educational and testing purposes only. Users are responsible for complying with applicable laws and regulations when using this software. 
