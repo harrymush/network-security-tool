@@ -68,7 +68,7 @@ A comprehensive network security and penetration testing tool built with Python 
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/network-security-tool.git
+git clone https://github.com/harrymush/network-security-tool.git
 cd network-security-tool
 ```
 
