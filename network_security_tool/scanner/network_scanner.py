@@ -2,15 +2,15 @@ import socket
 import threading
 import queue
 import time
-from typing import List, Dict, Tuple, Optional
-import concurrent.futures
-from scapy.all import ARP, Ether, srp
+from typing import List, Dict, Optional, Callable
 import ipaddress
+from scapy.all import ARP, Ether, srp
 
 class NetworkScanner:
     def __init__(self):
-        self.stop_event = threading.Event()
-        self.progress_queue = queue.Queue()
+        self._is_running = False
+        self._threads = []
+        self._results = queue.Queue()
         self.common_ports = {
             21: "FTP",
             22: "SSH",
@@ -29,39 +29,65 @@ class NetworkScanner:
             8080: "HTTP-Proxy"
         }
         
-    def scan_network(self, network: str, timeout: float = 1.0,
-                    max_threads: int = 100,
-                    progress_callback: Optional[callable] = None) -> List[Dict]:
-        """Scan a network for live hosts and open ports"""
-        self.stop_event.clear()
-        results = []
+    def scan_network(self, network_range: str, timeout: int = 5,
+                    callback: Optional[Callable[[int, str], None]] = None) -> List[Dict]:
+        """
+        Scan a network range for active hosts.
         
-        # Get all IPs in the network
-        try:
-            network = ipaddress.ip_network(network)
-            ip_list = [str(ip) for ip in network.hosts()]
-        except ValueError:
-            return [{"error": "Invalid network address"}]
+        Args:
+            network_range: Network range in CIDR notation (e.g., '192.168.1.0/24')
+            timeout: Timeout in seconds for each host
+            callback: Optional callback function to receive progress updates
             
-        # Scan for live hosts
-        live_hosts = self._scan_live_hosts(ip_list, timeout)
+        Returns:
+            List of dictionaries containing scan results
+        """
+        self._is_running = True
+        self._threads = []
+        self._results = queue.Queue()
         
-        # Scan ports for each live host
-        for host in live_hosts:
-            if self.stop_event.is_set():
+        try:
+            network = ipaddress.ip_network(network_range)
+        except ValueError as e:
+            return [{"error": f"Invalid network range: {str(e)}"}]
+            
+        total_hosts = network.num_addresses
+        scanned_hosts = 0
+        
+        # First, perform ARP scan to find live hosts
+        live_hosts = self._scan_live_hosts([str(ip) for ip in network.hosts()], timeout)
+        
+        # Then scan ports for each live host
+        for ip in live_hosts:
+            if not self._is_running:
                 break
                 
-            open_ports = self._scan_ports(host, timeout, max_threads)
-            if open_ports:
-                results.append({
-                    "ip": host,
-                    "ports": open_ports
-                })
+            thread = threading.Thread(
+                target=self._scan_host,
+                args=(ip, timeout)
+            )
+            self._threads.append(thread)
+            thread.start()
+            
+            # Limit number of concurrent threads
+            while len(self._threads) >= 100:
+                self._threads = [t for t in self._threads if t.is_alive()]
+                time.sleep(0.1)
                 
-            if progress_callback:
-                progress = (len(results) / len(live_hosts)) * 100
-                progress_callback(progress)
+            scanned_hosts += 1
+            if callback:
+                progress = int((scanned_hosts / len(live_hosts)) * 100)
+                callback(progress, f"Scanning {ip}...")
                 
+        # Wait for all threads to complete
+        for thread in self._threads:
+            thread.join()
+            
+        # Collect results
+        results = []
+        while not self._results.empty():
+            results.append(self._results.get())
+            
         return results
         
     def _scan_live_hosts(self, ip_list: List[str], timeout: float) -> List[str]:
@@ -80,50 +106,60 @@ class NetworkScanner:
             
         return live_hosts
         
-    def _scan_ports(self, host: str, timeout: float,
-                   max_threads: int) -> List[Dict]:
-        """Scan ports for a specific host"""
-        open_ports = []
+    def _scan_host(self, ip: str, timeout: int):
+        """
+        Scan a single host.
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
-            future_to_port = {
-                executor.submit(self._check_port, host, port, timeout): port
-                for port in self.common_ports.keys()
-            }
+        Args:
+            ip: IP address to scan
+            timeout: Timeout in seconds
+        """
+        if not self._is_running:
+            return
             
-            for future in concurrent.futures.as_completed(future_to_port):
-                if self.stop_event.is_set():
+        try:
+            # Try to get hostname
+            try:
+                hostname = socket.gethostbyaddr(ip)[0]
+            except:
+                hostname = ""
+                
+            # Scan common ports
+            open_ports = []
+            for port, service in self.common_ports.items():
+                if not self._is_running:
                     break
                     
-                port = future_to_port[future]
-                try:
-                    is_open, service = future.result()
-                    if is_open:
-                        open_ports.append({
-                            "port": port,
-                            "service": service,
-                            "state": "open"
-                        })
-                except Exception:
-                    pass
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                result = sock.connect_ex((ip, port))
+                sock.close()
+                
+                if result == 0:
+                    open_ports.append({
+                        "port": port,
+                        "service": service,
+                        "state": "open"
+                    })
                     
-        return open_ports
-        
-    def _check_port(self, host: str, port: int,
-                   timeout: float) -> Tuple[bool, str]:
-        """Check if a port is open and identify the service"""
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            result = sock.connect_ex((host, port))
-            sock.close()
+            status = "up" if open_ports else "down"
             
-            if result == 0:
-                return True, self.common_ports.get(port, "Unknown")
-            return False, ""
-        except:
-            return False, ""
+            result = {
+                "ip": ip,
+                "hostname": hostname,
+                "status": status,
+                "open_ports": open_ports
+            }
             
-    def stop_scan(self):
-        """Stop the current scan operation"""
-        self.stop_event.set() 
+            self._results.put(result)
+            
+        except Exception as e:
+            result = {
+                "ip": ip,
+                "error": str(e)
+            }
+            self._results.put(result)
+            
+    def stop(self):
+        """Stop the current scan."""
+        self._is_running = False 

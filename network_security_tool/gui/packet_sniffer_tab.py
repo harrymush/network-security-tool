@@ -1,255 +1,237 @@
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                            QLineEdit, QPushButton, QComboBox, QTableWidget,
-                            QTableWidgetItem, QHeaderView, QFrame, QTextEdit,
-                            QMessageBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
+    QPushButton, QLineEdit, QTableWidget, QTableWidgetItem,
+    QHeaderView, QTextEdit, QGroupBox, QFormLayout, QMessageBox
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from network_security_tool.sniffer.packet_sniffer import PacketSniffer
-import netifaces
-import sys
+import logging
+import re
 
-class SnifferThread(QThread):
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class PacketSnifferThread(QThread):
+    """Thread for running packet sniffing in the background."""
     packet_received = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
-    status_updated = pyqtSignal(dict)
-    
-    def __init__(self, sniffer, interface, filter):
+    finished = pyqtSignal()
+
+    def __init__(self, interface: str, filter_text: str):
         super().__init__()
-        self.sniffer = sniffer
         self.interface = interface
-        self.filter = filter
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_status)
-        self.timer.start(1000)  # Update status every second
-        
+        self.filter_text = filter_text
+        self.sniffer = PacketSniffer()
+        self.running = False
+
     def run(self):
-        result = self.sniffer.start_sniffing(
-            self.interface,
-            self.filter,
-            self.packet_received.emit
-        )
-        if result and "error" in result:
-            self.error_occurred.emit(result["error"])
-            
-    def update_status(self):
-        if self.sniffer:
-            stats = self.sniffer.get_statistics()
-            self.status_updated.emit(stats)
-            
-    def cleanup(self):
-        """Clean up resources"""
-        self.timer.stop()
-        if self.sniffer:
-            self.sniffer.stop_sniffing()
+        try:
+            logger.debug(f"Starting sniffing on interface {self.interface} with filter {self.filter_text}")
+            self.running = True
+            self.sniffer.start_sniffing(
+                interface=self.interface,
+                filter_text=self.filter_text,
+                callback=self._packet_callback
+            )
+        except Exception as e:
+            logger.error(f"Error in sniffer thread: {str(e)}")
+            self.error_occurred.emit(str(e))
+        finally:
+            self.finished.emit()
+
+    def _packet_callback(self, packet_info):
+        if self.running:
+            self.packet_received.emit(packet_info)
+
+    def stop(self):
+        logger.debug("Stopping sniffer thread")
+        self.running = False
+        self.sniffer.stop_sniffing()
 
 class PacketSnifferTab(QWidget):
+    """GUI tab for the packet sniffer."""
     def __init__(self):
         super().__init__()
-        self.sniffer = PacketSniffer()
         self.sniffer_thread = None
-        self.init_ui()
-        
-    def init_ui(self):
+        self.sniffer = PacketSniffer()
+        self.setup_ui()
+        self.update_interfaces()
+
+    def setup_ui(self):
+        """Initialize the user interface."""
         layout = QVBoxLayout()
-        
-        # Interface selection section
-        interface_frame = QFrame()
-        interface_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        interface_layout = QVBoxLayout(interface_frame)
-        
+        self.setLayout(layout)
+
         # Interface selection
-        interface_input_layout = QHBoxLayout()
-        interface_label = QLabel("Network Interface:")
+        interface_group = QGroupBox("Interface Selection")
+        interface_layout = QFormLayout()
+        
         self.interface_combo = QComboBox()
-        self.load_interfaces()
-        interface_input_layout.addWidget(interface_label)
-        interface_input_layout.addWidget(self.interface_combo)
-        interface_layout.addLayout(interface_input_layout)
+        self.interface_combo.setMinimumWidth(200)
+        interface_layout.addRow("Network Interface:", self.interface_combo)
         
-        # Filter input
-        filter_layout = QHBoxLayout()
-        filter_label = QLabel("BPF Filter:")
-        self.filter_input = QLineEdit()
-        self.filter_input.setPlaceholderText("e.g., tcp port 80")
-        filter_layout.addWidget(filter_label)
-        filter_layout.addWidget(self.filter_input)
-        interface_layout.addLayout(filter_layout)
+        self.filter_input = QTextEdit()
+        self.filter_input.setMaximumHeight(50)
+        self.filter_input.setPlaceholderText("Enter BPF filter (e.g., tcp port 80)")
+        interface_layout.addRow("Filter:", self.filter_input)
         
-        layout.addWidget(interface_frame)
-        
+        interface_group.setLayout(interface_layout)
+        layout.addWidget(interface_group)
+
         # Control buttons
         button_layout = QHBoxLayout()
-        self.start_btn = QPushButton("Start Capture")
-        self.start_btn.clicked.connect(self.start_capture)
-        self.stop_btn = QPushButton("Stop")
-        self.stop_btn.clicked.connect(self.stop_capture)
-        self.stop_btn.setEnabled(False)
-        self.clear_btn = QPushButton("Clear")
-        self.clear_btn.clicked.connect(self.clear_capture)
-        button_layout.addWidget(self.start_btn)
-        button_layout.addWidget(self.stop_btn)
-        button_layout.addWidget(self.clear_btn)
+        self.start_button = QPushButton("Start Sniffing")
+        self.start_button.clicked.connect(self.start_sniffing)
+        self.stop_button = QPushButton("Stop Sniffing")
+        self.stop_button.clicked.connect(self.stop_sniffing)
+        self.stop_button.setEnabled(False)
+        self.clear_button = QPushButton("Clear Results")
+        self.clear_button.clicked.connect(self.clear_results)
+        self.refresh_button = QPushButton("Refresh Interfaces")
+        self.refresh_button.clicked.connect(self.update_interfaces)
+        
+        button_layout.addWidget(self.start_button)
+        button_layout.addWidget(self.stop_button)
+        button_layout.addWidget(self.clear_button)
+        button_layout.addWidget(self.refresh_button)
         layout.addLayout(button_layout)
-        
-        # Status and Statistics
-        stats_frame = QFrame()
-        stats_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        stats_layout = QVBoxLayout(stats_frame)
-        
-        # Status label
-        self.status_label = QLabel("Status: Ready")
-        stats_layout.addWidget(self.status_label)
-        
+
         # Statistics
-        stats_row = QHBoxLayout()
+        stats_group = QGroupBox("Statistics")
+        stats_layout = QFormLayout()
         self.packets_label = QLabel("Packets: 0")
         self.duration_label = QLabel("Duration: 0s")
         self.rate_label = QLabel("Rate: 0 pps")
         
-        stats_row.addWidget(self.packets_label)
-        stats_row.addWidget(self.duration_label)
-        stats_row.addWidget(self.rate_label)
-        stats_layout.addLayout(stats_row)
+        stats_layout.addRow("Packets Captured:", self.packets_label)
+        stats_layout.addRow("Capture Duration:", self.duration_label)
+        stats_layout.addRow("Capture Rate:", self.rate_label)
         
-        layout.addWidget(stats_frame)
-        
-        # Packet table
-        self.packet_table = QTableWidget()
-        self.packet_table.setColumnCount(7)
-        self.packet_table.setHorizontalHeaderLabels([
-            "Time", "Source", "Destination", "Protocol",
-            "Length", "Source Port", "Info"
+        stats_group.setLayout(stats_layout)
+        layout.addWidget(stats_group)
+
+        # Results table
+        self.results_table = QTableWidget()
+        self.results_table.setColumnCount(5)
+        self.results_table.setHorizontalHeaderLabels([
+            "Time", "Source", "Destination", "Protocol", "Length"
         ])
-        self.packet_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.packet_table)
+        self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.results_table)
+
+        # Status messages
+        self.status_text = QTextEdit()
+        self.status_text.setReadOnly(True)
+        self.status_text.setMaximumHeight(100)
+        layout.addWidget(self.status_text)
+
+    def update_interfaces(self):
+        """Update the list of available network interfaces."""
+        self.interface_combo.clear()
+        self.status_text.append("Refreshing interface list...")
         
-        # Packet details
-        details_frame = QFrame()
-        details_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        details_layout = QVBoxLayout(details_frame)
-        
-        details_label = QLabel("Packet Details:")
-        self.details_text = QTextEdit()
-        self.details_text.setReadOnly(True)
-        details_layout.addWidget(details_label)
-        details_layout.addWidget(self.details_text)
-        
-        layout.addWidget(details_frame)
-        
-        self.setLayout(layout)
-        
-    def load_interfaces(self):
-        """Load available network interfaces"""
         try:
-            interfaces = netifaces.interfaces()
-            for iface in interfaces:
-                self.interface_combo.addItem(iface)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load network interfaces: {str(e)}")
+            interfaces = self.sniffer.get_interfaces()
             
-    def start_capture(self):
+            logger.debug(f"Found interfaces: {interfaces}")
+            self.status_text.append(f"Found {len(interfaces)} interfaces")
+            
+            for interface in interfaces:
+                self.interface_combo.addItem(interface)
+                self.status_text.append(f"Added interface: {interface}")
+            
+            if not interfaces:
+                self.status_text.append("Warning: No interfaces found!")
+                logger.warning("No interfaces found")
+            else:
+                self.status_text.append("Interface list updated successfully")
+                
+        except Exception as e:
+            error_msg = f"Error updating interfaces: {str(e)}"
+            logger.error(error_msg)
+            self.status_text.append(error_msg)
+            QMessageBox.critical(self, "Error", error_msg)
+
+    def validate_filter(self, filter_str: str) -> bool:
+        """Validate the BPF filter syntax."""
+        if not filter_str:
+            return True
+        # Basic validation - more complex validation would require BPF parser
+        return bool(re.match(r'^[a-zA-Z0-9\s\.\:\=\>\<\!\&\|\-\+\*\(\)]+$', filter_str))
+
+    def start_sniffing(self):
+        """Start the packet capture."""
         interface = self.interface_combo.currentText()
+        filter_text = self.filter_input.toPlainText()
+        
         if not interface:
             QMessageBox.warning(self, "Warning", "Please select a network interface")
             return
-            
-        try:
-            # Ensure any previous capture is stopped
-            if self.sniffer_thread and self.sniffer_thread.isRunning():
-                self.stop_capture()
-                
-            self.start_btn.setEnabled(False)
-            self.stop_btn.setEnabled(True)
-            self.packet_table.setRowCount(0)
-            self.details_text.clear()
-            self.status_label.setText("Status: Starting capture...")
-            
-            self.sniffer_thread = SnifferThread(
-                self.sniffer,
-                interface,
-                self.filter_input.text().strip()
-            )
-            
-            self.sniffer_thread.packet_received.connect(self.add_packet)
-            self.sniffer_thread.error_occurred.connect(self.handle_error)
-            self.sniffer_thread.status_updated.connect(self.update_status)
-            self.sniffer_thread.start()
-            
-        except Exception as e:
-            self.handle_error(str(e))
-            self.start_btn.setEnabled(True)
-            self.stop_btn.setEnabled(False)
-            
-    def stop_capture(self):
+
+        if not self.validate_filter(filter_text):
+            QMessageBox.warning(self, "Warning", "Invalid filter syntax")
+            return
+
+        self.start_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self.clear_button.setEnabled(False)
+        self.status_text.clear()
+
+        self.sniffer_thread = PacketSnifferThread(interface, filter_text)
+        self.sniffer_thread.packet_received.connect(self.add_packet)
+        self.sniffer_thread.error_occurred.connect(self.handle_error)
+        self.sniffer_thread.finished.connect(self.sniffing_finished)
+        
+        self.status_text.append(f"Started sniffing on {interface}")
+        if filter_text:
+            self.status_text.append(f"Using filter: {filter_text}")
+
+        self.sniffer_thread.start()
+
+    def stop_sniffing(self):
+        """Stop the packet capture."""
         if self.sniffer_thread:
-            self.status_label.setText("Status: Stopping capture...")
-            self.sniffer_thread.cleanup()
-            self.sniffer_thread.wait(2000)  # Wait up to 2 seconds for thread to stop
-            if self.sniffer_thread.isRunning():
-                self.sniffer_thread.terminate()  # Force stop if not responding
-            self.sniffer_thread = None
-            self.start_btn.setEnabled(True)
-            self.stop_btn.setEnabled(False)
-            self.status_label.setText("Status: Ready")
-            
-    def clear_capture(self):
-        self.packet_table.setRowCount(0)
-        self.details_text.clear()
-        
+            self.sniffer_thread.stop()
+            self.status_text.append("Stopped sniffing")
+            self.start_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+            self.clear_button.setEnabled(True)
+
+    def clear_results(self):
+        """Clear the capture results."""
+        self.results_table.setRowCount(0)
+        self.status_text.clear()
+        self.packets_label.setText("Packets: 0")
+        self.duration_label.setText("Duration: 0s")
+        self.rate_label.setText("Rate: 0 pps")
+
     def add_packet(self, packet_info):
-        """Add a new packet to the table"""
-        try:
-            row = self.packet_table.rowCount()
-            self.packet_table.insertRow(row)
-            
-            self.packet_table.setItem(row, 0, QTableWidgetItem(packet_info["timestamp"]))
-            self.packet_table.setItem(row, 1, QTableWidgetItem(packet_info["source"]))
-            self.packet_table.setItem(row, 2, QTableWidgetItem(packet_info["destination"]))
-            self.packet_table.setItem(row, 3, QTableWidgetItem(packet_info["protocol"]))
-            self.packet_table.setItem(row, 4, QTableWidgetItem(str(packet_info["length"])))
-            
-            source_port = str(packet_info.get("source_port", ""))
-            self.packet_table.setItem(row, 5, QTableWidgetItem(source_port))
-            
-            self.packet_table.setItem(row, 6, QTableWidgetItem(packet_info["info"]))
-            
-            # Auto-scroll to the new packet
-            self.packet_table.scrollToBottom()
-        except Exception as e:
-            print(f"Error adding packet to table: {e}", file=sys.stderr)
-            
-    def update_status(self, stats):
-        """Update the status and statistics display"""
-        try:
-            self.packets_label.setText(f"Packets: {stats['packets_captured']}")
-            self.duration_label.setText(f"Duration: {stats['duration']:.1f}s")
-            self.rate_label.setText(f"Rate: {stats['packets_per_second']:.1f} pps")
-            
-            if stats['is_running']:
-                self.status_label.setText("Status: Capturing...")
-            else:
-                self.status_label.setText("Status: Ready")
-        except Exception as e:
-            print(f"Error updating status: {e}", file=sys.stderr)
-            
-    def handle_error(self, error_message):
-        """Handle errors from the sniffer thread"""
-        QMessageBox.critical(self, "Error", error_message)
-        self.stop_capture()
+        """Update the UI with a new packet."""
+        row = self.results_table.rowCount()
+        self.results_table.insertRow(row)
         
-    def show_packet_details(self, row, column):
-        """Show detailed information about the selected packet"""
-        try:
-            packet_info = {
-                "Time": self.packet_table.item(row, 0).text(),
-                "Source": self.packet_table.item(row, 1).text(),
-                "Destination": self.packet_table.item(row, 2).text(),
-                "Protocol": self.packet_table.item(row, 3).text(),
-                "Length": self.packet_table.item(row, 4).text(),
-                "Source Port": self.packet_table.item(row, 5).text(),
-                "Info": self.packet_table.item(row, 6).text()
-            }
-            
-            details = "\n".join(f"{key}: {value}" for key, value in packet_info.items())
-            self.details_text.setText(details)
-        except Exception as e:
-            print(f"Error showing packet details: {e}", file=sys.stderr) 
+        self.results_table.setItem(row, 0, QTableWidgetItem(packet_info['time']))
+        self.results_table.setItem(row, 1, QTableWidgetItem(packet_info['source']))
+        self.results_table.setItem(row, 2, QTableWidgetItem(packet_info['destination']))
+        self.results_table.setItem(row, 3, QTableWidgetItem(packet_info['protocol']))
+        self.results_table.setItem(row, 4, QTableWidgetItem(str(packet_info['length'])))
+
+        # Update statistics
+        stats = self.sniffer_thread.sniffer.get_statistics()
+        self.packets_label.setText(f"Packets: {stats['packets']}")
+        self.duration_label.setText(f"Duration: {stats['duration']:.1f}s")
+        self.rate_label.setText(f"Rate: {stats['packets_per_second']:.1f} pps")
+
+    def handle_error(self, error_msg):
+        """Handle capture errors."""
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.clear_button.setEnabled(True)
+        self.status_text.append(f"Error: {error_msg}")
+        QMessageBox.critical(self, "Error", f"Capture failed: {error_msg}")
+
+    def sniffing_finished(self):
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.status_text.append("Sniffing finished") 

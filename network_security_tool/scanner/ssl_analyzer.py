@@ -1,124 +1,166 @@
 import socket
 import ssl
-import OpenSSL
+from OpenSSL import SSL, crypto
 from datetime import datetime
-from typing import Dict, List, Optional
-import re
+from typing import Dict, List, Optional, Callable
 
 class SSLAnalyzer:
     def __init__(self):
-        self.results = {}
+        self._is_running = False
         
-    def analyze_host(self, host: str, port: int = 443) -> Dict:
-        """Analyze SSL/TLS configuration of a host"""
-        self.results = {
-            "host": host,
-            "port": port,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "certificate": {},
-            "protocols": [],
-            "ciphers": [],
-            "vulnerabilities": [],
-            "error": None
-        }
+    def analyze_ssl(self, host: str, port: int = 443,
+                   callback: Optional[Callable[[str], None]] = None) -> List[Dict]:
+        """
+        Analyze SSL/TLS configuration of a host.
+        
+        Args:
+            host: Hostname or IP address
+            port: Port number (default: 443)
+            callback: Optional callback function to receive results in real-time
+            
+        Returns:
+            List of dictionaries containing SSL analysis results
+        """
+        self._is_running = True
+        results = []
         
         try:
             # Create SSL context
-            context = ssl.create_default_context()
+            context = SSL.Context(SSL.TLSv1_2_METHOD)
             
-            # Try different SSL/TLS versions
-            for protocol in [ssl.PROTOCOL_TLS, ssl.PROTOCOL_TLSv1_2, ssl.PROTOCOL_TLSv1_1, ssl.PROTOCOL_TLSv1]:
-                try:
-                    with socket.create_connection((host, port)) as sock:
-                        with context.wrap_socket(sock, server_hostname=host) as ssock:
-                            # Get certificate info
-                            cert = ssock.getpeercert()
-                            cert_info = ssl.get_server_certificate((host, port))
-                            x509 = OpenSSL.crypto.load_certificate(
-                                OpenSSL.crypto.FILETYPE_PEM, cert_info
-                            )
-                            
-                            # Store certificate details
-                            self.results["certificate"] = {
-                                "subject": dict(x509.get_subject().get_components()),
-                                "issuer": dict(x509.get_issuer().get_components()),
-                                "version": x509.get_version() + 1,
-                                "serial_number": hex(x509.get_serial_number())[2:],
-                                "not_before": x509.get_notBefore().decode('ascii'),
-                                "not_after": x509.get_notAfter().decode('ascii'),
-                                "signature_algorithm": x509.get_signature_algorithm().decode('ascii'),
-                                "public_key_bits": x509.get_pubkey().bits(),
-                                "public_key_type": x509.get_pubkey().type() == OpenSSL.crypto.TYPE_RSA
-                            }
-                            
-                            # Get supported protocols
-                            self.results["protocols"].append(ssock.version())
-                            
-                            # Get cipher info
-                            cipher = ssock.cipher()
-                            if cipher:
-                                self.results["ciphers"].append({
-                                    "name": cipher[0],
-                                    "version": cipher[1],
-                                    "bits": cipher[2]
-                                })
-                                
-                            # Check for vulnerabilities
-                            self._check_vulnerabilities(ssock, x509)
-                            
-                except ssl.SSLError as e:
-                    continue
-                except Exception as e:
-                    self.results["error"] = str(e)
-                    return self.results
-                    
-            return self.results
+            # Create socket and wrap with SSL
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            ssl_sock = SSL.Connection(context, sock)
             
-        except Exception as e:
-            self.results["error"] = str(e)
-            return self.results
+            # Connect to host
+            ssl_sock.connect((host, port))
+            ssl_sock.do_handshake()
             
-    def _check_vulnerabilities(self, ssock: ssl.SSLSocket, cert: OpenSSL.crypto.X509) -> None:
-        """Check for common SSL/TLS vulnerabilities"""
-        # Check certificate expiration
-        not_after = datetime.strptime(cert.get_notAfter().decode('ascii'), '%Y%m%d%H%M%S%z')
-        if (not_after - datetime.now(not_after.tzinfo)).days < 30:
-            self.results["vulnerabilities"].append({
-                "type": "Certificate",
-                "severity": "Medium",
-                "description": "SSL certificate expires soon",
-                "details": f"Certificate expires on {not_after.strftime('%Y-%m-%d')}"
-            })
+            # Get certificate
+            cert = ssl_sock.get_peer_certificate()
             
-        # Check for weak protocols
-        if ssock.version() in ["SSLv2", "SSLv3", "TLSv1", "TLSv1.1"]:
-            self.results["vulnerabilities"].append({
-                "type": "Protocol",
-                "severity": "High",
-                "description": f"Insecure SSL/TLS version: {ssock.version()}",
-                "details": "Older SSL/TLS versions have known vulnerabilities"
-            })
-            
-        # Check for weak ciphers
-        cipher = ssock.cipher()
-        if cipher:
-            if cipher[2] < 128:  # Check key length
-                self.results["vulnerabilities"].append({
-                    "type": "Cipher",
-                    "severity": "High",
-                    "description": "Weak cipher suite",
-                    "details": f"Cipher {cipher[0]} uses {cipher[2]}-bit keys"
-                })
+            # Analyze certificate
+            cert_info = self._analyze_certificate(cert)
+            results.append(cert_info)
+            if callback:
+                callback(f"Certificate analysis complete")
                 
-        # Check certificate signature algorithm
-        if cert.get_signature_algorithm().decode('ascii').startswith(b"md5"):
-            self.results["vulnerabilities"].append({
-                "type": "Certificate",
-                "severity": "High",
-                "description": "Weak certificate signature algorithm",
-                "details": "MD5-based signatures are vulnerable to collision attacks"
+            # Check SSL/TLS configuration
+            config_info = self._check_ssl_config(ssl_sock)
+            results.append(config_info)
+            if callback:
+                callback(f"SSL configuration analysis complete")
+                
+            # Check for common vulnerabilities
+            vuln_info = self._check_vulnerabilities(ssl_sock)
+            results.extend(vuln_info)
+            if callback:
+                callback(f"Vulnerability check complete")
+                
+        except Exception as e:
+            result = {
+                "error": f"SSL analysis failed: {str(e)}"
+            }
+            results.append(result)
+            if callback:
+                callback(f"Error: {str(e)}")
+                
+        finally:
+            try:
+                ssl_sock.close()
+                sock.close()
+            except:
+                pass
+                
+        return results
+        
+    def _analyze_certificate(self, cert: crypto.X509) -> Dict:
+        """Analyze SSL certificate."""
+        result = {
+            "type": "certificate",
+            "subject": dict(cert.get_subject().get_components()),
+            "issuer": dict(cert.get_issuer().get_components()),
+            "version": cert.get_version(),
+            "serial_number": cert.get_serial_number(),
+            "not_before": cert.get_notBefore().decode(),
+            "not_after": cert.get_notAfter().decode(),
+            "signature_algorithm": cert.get_signature_algorithm().decode(),
+            "public_key_bits": cert.get_pubkey().bits(),
+            "public_key_type": cert.get_pubkey().type()
+        }
+        
+        # Check certificate expiration
+        not_after = datetime.strptime(result["not_after"], "%Y%m%d%H%M%SZ")
+        if not_after < datetime.now():
+            result["status"] = "expired"
+        else:
+            result["status"] = "valid"
+            
+        return result
+        
+    def _check_ssl_config(self, ssl_sock: SSL.Connection) -> Dict:
+        """Check SSL/TLS configuration."""
+        result = {
+            "type": "configuration",
+            "protocol": ssl_sock.get_protocol_version_name(),
+            "cipher": ssl_sock.get_cipher_name(),
+            "compression": ssl_sock.get_current_compression_method()
+        }
+        
+        # Check for weak protocols
+        weak_protocols = ["SSLv2", "SSLv3", "TLSv1", "TLSv1.1"]
+        if result["protocol"] in weak_protocols:
+            result["status"] = "weak"
+        else:
+            result["status"] = "secure"
+            
+        return result
+        
+    def _check_vulnerabilities(self, ssl_sock: SSL.Connection) -> List[Dict]:
+        """Check for common SSL/TLS vulnerabilities."""
+        results = []
+        
+        # Check for Heartbleed vulnerability
+        try:
+            ssl_sock.send(b"\x18\x03\x02\x00\x03\x01\x40\x00")
+            response = ssl_sock.recv(1024)
+            if len(response) > 0:
+                results.append({
+                    "type": "vulnerability",
+                    "name": "Heartbleed",
+                    "status": "vulnerable",
+                    "severity": "critical"
+                })
+        except:
+            results.append({
+                "type": "vulnerability",
+                "name": "Heartbleed",
+                "status": "not vulnerable",
+                "severity": "none"
             })
             
-    def get_results(self) -> Dict:
-        """Get the analysis results"""
-        return self.results 
+        # Check for POODLE vulnerability
+        try:
+            ssl_sock.send(b"\x80\x00\x00\x00\x00\x00\x00\x00")
+            response = ssl_sock.recv(1024)
+            if len(response) > 0:
+                results.append({
+                    "type": "vulnerability",
+                    "name": "POODLE",
+                    "status": "vulnerable",
+                    "severity": "high"
+                })
+        except:
+            results.append({
+                "type": "vulnerability",
+                "name": "POODLE",
+                "status": "not vulnerable",
+                "severity": "none"
+            })
+            
+        return results
+        
+    def stop(self):
+        """Stop the current analysis."""
+        self._is_running = False 
