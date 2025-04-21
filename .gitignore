@@ -25,6 +25,7 @@ build/
 dist/
 *.spec
 dmg_temp/
+dmg_temp/**/*
 
 # Virtual Environment
 venv/
@@ -46,4 +47,11 @@ ENV/
 ._*
 
 # Logs
-*.log 
+*.log
+
+# Application specific
+*.dmg
+*.icns
+icon.iconset/
+icon.png
+icons/ 
