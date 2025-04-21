@@ -42,7 +42,7 @@ A comprehensive network security toolkit built with Python and PyQt6, offering v
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/network-security-tool.git
+git clone https://github.com/harrymush/network-security-tool.git
 cd network-security-tool
 ```
 
@@ -88,4 +88,4 @@ Some features may require root/administrator privileges to function properly, pa
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Disclaimer
-This tool is for educational and testing purposes only. Users are responsible for complying with applicable laws and regulations when using this software. 
+This tool should only be used in compliance with all applicable laws and regulations. The authors are not responsible for any misuse or damage caused by this program. This software is for educational and testing purposes only.
