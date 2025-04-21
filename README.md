@@ -223,5 +223,7 @@ Never scan, sniff, crack, or test systems you do not own or have explicit permis
 We recommend using:
 
 Local test environments (e.g., VirtualBox, Docker)
+
 Legal targets like DVWA, OWASP Juice Shop, and VulnHub boxes
+
 Reserved test domains (example.com) and IPs (192.0.2.0/24)
